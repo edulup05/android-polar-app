@@ -90,13 +90,9 @@ class MyServiceWork : Service() {
         public const val TAG = "Service"
         private const val API_LOGGER_TAG = "API LOGGER"
         private const val PERMISSION_REQUEST_CODE = 1
-
-        // SharedPreferences para controlar si el servicio está en curso
-        /*private const val PREFS_NAME = "MyServicePrefs"
-        private const val KEY_PROCESSING = "isProcessing"*/
     }
 
-    /*private val insulinaReceiver = object : BroadcastReceiver() {
+    private val insulinaReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val insulinaJson = intent?.getStringExtra("insulina_json")
             if (insulinaJson != null) {
@@ -112,7 +108,7 @@ class MyServiceWork : Service() {
                 procesarCarbohidratosJson(json)
             }
         }
-    }*/
+    }
 
     private val api: PolarBleApi by lazy {
         // Notice all features are enabled
@@ -183,6 +179,12 @@ class MyServiceWork : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "🛠️ Servicio creado (onCreate) - MyServiceWork")
+
+        val filter = IntentFilter("com.polar.INSULINA")
+        LocalBroadcastManager.getInstance(this).registerReceiver(insulinaReceiver, filter)
+
+        val filter2 = IntentFilter("com.polar.CARBOHIDRATOS")
+        LocalBroadcastManager.getInstance(this).registerReceiver(carbohidratosReceiver, filter2)
     }
 
     ///////////////////////////////////////////////
@@ -891,16 +893,6 @@ class MyServiceWork : Service() {
                 Log.d(TAG, "DISCONNECTED: ${polarDeviceInfo.deviceId}")
                 deviceConnected = false
                 enviarMensaje("status","Desconectado el dispositivo")
-                //thread {
-                //    Thread.sleep(3000)
-                //    if(indexDeviceId+1 < devices.size){
-                //        indexDeviceId+=1
-                //        deviceId = devices[indexDeviceId]
-                //        autoConnectFunction()
-                //    }else{
-                //        terminarEjecucion()
-                //   }
-                //}
                 Log.d(TAG, "Se llama a terminarEjecución() desde deviceDisconnected()")
                 terminarEjecucion()
             }
@@ -1001,7 +993,7 @@ class MyServiceWork : Service() {
     }
 
     ///////////////////////////////////////////////
-    /*private fun procesarInsulinaJson(json: String) {
+    private fun procesarInsulinaJson(json: String) {
         if (mqttConnected) {
             try {
                 connection.publish(
@@ -1036,7 +1028,7 @@ class MyServiceWork : Service() {
         } else {
             Log.e(TAG, "❌ MQTT no está conectado. No se pudo enviar carbohidratos.")
         }
-    }*/
+    }
 
     ///////////////////////////////////////////////
     private fun createNotification(): Notification {

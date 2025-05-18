@@ -32,7 +32,6 @@ class AlarmReceiver : BroadcastReceiver() {
         /*Log.d(TAG, "Se inicia el servicio")
         context.startService(serviceIntent)*/
 
-
         Log.d(TAG, "Se inicia el servicio")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(serviceIntent)
