@@ -54,14 +54,14 @@ class MainActivityWork : AppCompatActivity() {
     private lateinit var estatusText: TextView
 
     //Referencias para lo relacionado con el botón de insulina
-    /*private lateinit var spinnerTipoInsulina: Spinner
+    private lateinit var spinnerTipoInsulina: Spinner
     private lateinit var editTextUnidadesInsulina: EditText
     private lateinit var btnRegistrarInsulina: Button
 
     //Referencias para lo relacionado con el botón de carbohidratos
     private lateinit var editTextCarbohidratos: EditText
     private lateinit var spinnerTipoAbsorcion: Spinner
-    private lateinit var btnRegistrarCarbohidratos: Button*/
+    private lateinit var btnRegistrarCarbohidratos: Button
 
     private var dispositivosClientes = HashMap<String, String>()
     private var dispositivos = ArrayList<String>()
@@ -84,7 +84,7 @@ class MainActivityWork : AppCompatActivity() {
         batteryContainer = findViewById(R.id.battery_container_list)
 
         //Configuración del botón de registro de insulina
-        /*editTextUnidadesInsulina = findViewById(R.id.editTextUnidadesInsulina)
+        editTextUnidadesInsulina = findViewById(R.id.editTextUnidadesInsulina)
         btnRegistrarInsulina = findViewById(R.id.btnRegistrarInsulina)
 
         //Configuración del Spinner del tipo de insulina
@@ -104,7 +104,7 @@ class MainActivityWork : AppCompatActivity() {
         val tiposAbsorcion = listOf("Rápida", "Media", "Lenta")
         val adapterAbsorcion = ArrayAdapter(this, R.layout.spinner_item, tiposAbsorcion)
         adapterAbsorcion.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        spinnerTipoAbsorcion.adapter = adapterAbsorcion*/
+        spinnerTipoAbsorcion.adapter = adapterAbsorcion
 
         estatusText.text = "Iniciando..."
 
@@ -167,7 +167,7 @@ class MainActivityWork : AppCompatActivity() {
         }
 
         //Acción para el botón de insulina
-        /*btnRegistrarInsulina.setOnClickListener {
+        btnRegistrarInsulina.setOnClickListener {
             val unidades = editTextUnidadesInsulina.text.toString().trim()
             val tipo = spinnerTipoInsulina.selectedItem.toString().lowercase()
 
@@ -192,7 +192,7 @@ class MainActivityWork : AppCompatActivity() {
                 Log.w(TAG, "⚠️ Gramos de carbohidratos vacíos")
                 showToast("Introduce los gramos de carbohidratos")
             }
-        }*/
+        }
     }
 
     ///////////////////////////////////////////////
@@ -241,7 +241,7 @@ class MainActivityWork : AppCompatActivity() {
         val json = gson.toJson(registro)
 
         // Lanzar BroadcastReceiver con un Intent extra para la insulina
-        val intent = Intent("com.epilsera.INSULINA")
+        val intent = Intent("com.polar.INSULINA")
         intent.putExtra("insulina_json", json)
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
@@ -262,7 +262,7 @@ class MainActivityWork : AppCompatActivity() {
         val json = gson.toJson(registro)
 
         // Lanzar BroadcastReceiver con un Intent extra para los carbohidratos
-        val intent = Intent("com.epilsera.CARBOHIDRATOS")
+        val intent = Intent("com.polar.CARBOHIDRATOS")
         intent.putExtra("carbohidratos_json", json)
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
