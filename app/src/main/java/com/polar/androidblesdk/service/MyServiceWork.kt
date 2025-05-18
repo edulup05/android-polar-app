@@ -159,10 +159,10 @@ class MyServiceWork : Service() {
     var gson = Gson()
 
     //60 minutos, en milisegundos. Define el tiempo mínimo que debe pasar entre una descarga y la siguiente.
-    private var frecuenciaDescarga = 6 * 60000 //60
+    private var frecuenciaDescarga = 20 * 60000 //6
 
     //10 minutos, en milisegundos. Define cuándo se intentará reconectar a la pulsera.
-    private var intervaloMinutos =  2 //20
+    private var intervaloMinutos =  10 //2
     private var intervalo = intervaloMinutos * 60000
 
     private var realizaConexion = false
@@ -476,7 +476,7 @@ class MyServiceWork : Service() {
         var size = entryCache[deviceId]?.size
         var fullyExecute = true
         if (offlineEntry != null) {
-            api.getOfflineRecord(deviceId, offlineEntry, yourSecret)
+            val disposable = api.getOfflineRecord(deviceId, offlineEntry, yourSecret)
                 .subscribe(
                     {
                         Log.d(TAG, "Recording ($index) ${offlineEntry.path} downloaded. Size: ${offlineEntry.size}")
@@ -494,6 +494,8 @@ class MyServiceWork : Service() {
                         var fileOutputStream : FileOutputStream
                         try {
                             when (it) {
+                                ///////////////////////////////////////////////
+                                // SENSOR ACC
                                 is PolarOfflineRecordingData.AccOfflineRecording -> {
                                     typeSensor = "acc"
                                     sample_rate = settingsACC[PolarSensorSetting.SettingType.SAMPLE_RATE].toString()
@@ -513,13 +515,46 @@ class MyServiceWork : Service() {
                                             "datatype time,long,long,long\n" +
                                             "time,x,y,z\n"
                                     fileOutputStream.write(headerLine.toByteArray())
+
+                                    val accList = mutableListOf<Acc>()
+
                                     for (sample in it.data.samples) {
                                         val line = "${sample.timeStamp},${sample.x},${sample.y},${sample.z}\n"
+                                        // Crea y guarda el objeto Acc
+                                        val acc = Acc(
+                                            timestamp = nanosSince2000ToUnixNanos(sample.timeStamp),
+                                            x = sample.x,
+                                            y = sample.y,
+                                            z = sample.z
+                                        )
+                                        accList.add(acc)
+
                                         fileOutputStream.write(line.toByteArray())
                                     }
                                     Log.d(TAG, "Read data ok")
                                     fileOutputStream.close()
+
+                                    // AÑADIDO PARA ENVIAR CSV
+                                    if (mqttConnected && file != null && file.exists()) {
+                                        try {
+                                            //CSV
+                                            //val csvContent = file.readText()
+                                            //connection.publish("polar/${deviceId}/${typeSensor}",csvContent.toByteArray(), QoS.AT_LEAST_ONCE, false)
+
+                                            //JSON
+                                            val jsonOutput = mapOf("readings" to accList)
+                                            val jsonArray = gson.toJson(jsonOutput)
+                                            connection.publish("polar/${typeSensor}/json", jsonArray.toByteArray(), QoS.AT_LEAST_ONCE, false
+                                            )
+                                            Log.d(TAG, "✅ Archivo CSV/JSON enviado por MQTT al topic polar/${typeSensor}")
+                                        }
+                                        catch (e: Exception) {
+                                            Log.e(TAG, "❌ Error al enviar archivo por MQTT: ${e.message}")
+                                        }
+                                    }
                                 }
+                                ///////////////////////////////////////////////
+                                // SENSOR GYR
                                 is PolarOfflineRecordingData.GyroOfflineRecording -> {
                                     typeSensor = "gyr"
                                     file = File(fileDir, "file_${deviceId}_${typeSensor}_${it.startTime.timeInMillis}.csv")
@@ -538,13 +573,35 @@ class MyServiceWork : Service() {
                                             "datatype time,long,long,long\n" +
                                             "time,x,y,z\n"
                                     fileOutputStream.write(headerLine.toByteArray())
+
+                                    val gyrList = mutableListOf<Gyr>()
                                     for (sample in it.data.samples) {
-                                        //val line = "${sample.timeStamp},${sample.x},${sample.y},${sample.z},${deviceId},${patientId}\n"
-                                        val line = "${sample.timeStamp},${sample.x},${sample.y},${sample.z}\n"
+                                        val unixTs = nanosSince2000ToUnixNanos(sample.timeStamp)
+                                        val line = "$unixTs,${sample.x},${sample.y},${sample.z}\n"
                                         fileOutputStream.write(line.toByteArray())
+
+                                        gyrList.add(Gyr(unixTs, sample.x, sample.y, sample.z))
                                     }
                                     fileOutputStream.close()
+
+                                    if (mqttConnected && file.exists()) {
+                                        try {
+                                            //CSV
+                                            //val csvContent = file.readText()
+                                            //connection.publish("polar/${deviceId}/${typeSensor}", csvContent.toByteArray(), QoS.AT_LEAST_ONCE, false)
+
+                                            //JSON
+                                            val jsonOutput = mapOf("readings" to gyrList)
+                                            val jsonArray = gson.toJson(jsonOutput)
+                                            connection.publish("polar/${typeSensor}/json", jsonArray.toByteArray(), QoS.AT_LEAST_ONCE, false)
+                                        }
+                                        catch (e: Exception) {
+                                            Log.e(TAG, "❌ Error al enviar archivo GYR: ${e.message}")
+                                        }
+                                    }
                                 }
+                                ///////////////////////////////////////////////
+                                // SENSOR PPG
                                 is PolarOfflineRecordingData.PpgOfflineRecording -> {
                                     typeSensor = "ppg"
                                     file = File(fileDir, "file_${deviceId}_${typeSensor}_${it.startTime.timeInMillis}.csv")
@@ -562,15 +619,33 @@ class MyServiceWork : Service() {
                                             "datatype time,long,long,long,long\n" +
                                             "time,v1,v2,v3,v4\n"
                                     fileOutputStream.write(headerLine.toByteArray())
+
+                                    val ppgList = mutableListOf<Ppg>()
                                     for (sample in it.data.samples) {
-                                        var line = "${sample.timeStamp}"
-                                        for (s in sample.channelSamples) {
-                                            line += ",${s.toString()}"
-                                        }
-                                        line += "\n"
+                                        val unixTs = nanosSince2000ToUnixNanos(sample.timeStamp)
+                                        val values = sample.channelSamples
+                                        val line = "$unixTs,${values[0]},${values[1]},${values[2]},${values[3]}\n"
                                         fileOutputStream.write(line.toByteArray())
+
+                                        ppgList.add(Ppg(unixTs, values[0], values[1], values[2], values[3]))
                                     }
                                     fileOutputStream.close()
+
+                                    if (mqttConnected && file.exists()) {
+                                        try {
+                                            //CSV
+                                            //val csvContent = file.readText()
+                                            //connection.publish("polar/${deviceId}/${typeSensor}", csvContent.toByteArray(), QoS.AT_LEAST_ONCE, false)
+
+                                            //JSON
+                                            val jsonOutput = mapOf("readings" to ppgList)
+                                            val jsonArray = gson.toJson(jsonOutput)
+                                            connection.publish("polar/${typeSensor}/json", jsonArray.toByteArray(), QoS.AT_LEAST_ONCE, false)
+                                        }
+                                        catch (e: Exception) {
+                                            Log.e(TAG, "❌ Error al enviar archivo PPG: ${e.message}")
+                                        }
+                                    }
                                 }
                                 else -> {
                                     Log.d(TAG, "Recording type is not yet implemented")
