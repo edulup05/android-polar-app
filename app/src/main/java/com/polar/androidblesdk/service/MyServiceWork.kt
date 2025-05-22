@@ -1,6 +1,6 @@
 package com.polar.androidblesdk.service
 
-//PROYECTO 2 (ACTUAL)
+//PROYECTO REAL (ACTUAL)
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -80,7 +80,7 @@ import java.util.Date
 import java.util.UUID
 import kotlin.concurrent.thread
 
-///////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////
 class MyServiceWork : Service() {
     val jobId : UUID = UUID.randomUUID()
     private var broadcastIntent = Intent("prueba")
@@ -134,37 +134,44 @@ class MyServiceWork : Service() {
     private lateinit var settingsGYRO : MutableMap<PolarSensorSetting.SettingType, Int>
     private lateinit var settingsPPG : MutableMap<PolarSensorSetting.SettingType, Int>
     private lateinit var triggerFeaturesMap: Map<PolarBleApi.PolarDeviceDataType, PolarSensorSetting?>
-    private lateinit var fileDir : File
 
+    private lateinit var fileDir : File
     private val entryCache: MutableMap<String, MutableList<PolarOfflineRecordingEntry>> = mutableMapOf()
     private lateinit var handler: Handler
 
     private var deviceConnected = false
-
     private var activateTrigger = true
+
     private var minimoTiempoParaProcesarGrabacion = 1000 * 60
+
     private var deviceId : String= ""
-    private var devices: Array<String> = arrayOf("BA057E29")
+    private var devices: Array<String> = arrayOf("C4A50D2E") //BA057E29 - C4A50D2E
+    private var indexDeviceId = 0
+
     private var startConnectDate = ""
     private var startConnectDateMilis = System.currentTimeMillis()
     private var nextConnectDateMilis = System.currentTimeMillis()
-    private var indexDeviceId = 0
+
     private var wakeLock: PowerManager.WakeLock? = null
+
     private var mqttServerURI = "tcp://16.171.152.69:1883"
     private var mqttTopic = "polar/"
-    private lateinit var connection: BlockingConnection
     private var mqttConnected = false
+
+    private lateinit var connection: BlockingConnection
+
     var gson = Gson()
 
-    //60 minutos, en milisegundos. Define el tiempo mínimo que debe pasar entre una descarga y la siguiente.
-    private var frecuenciaDescarga = 40 * 60000 //8
+    //Define el tiempo mínimo que debe pasar entre una descarga y la siguiente.
+    private var frecuenciaDescarga = 25 * 60000 //Funcionamiento bueno con 15
 
-    //10 minutos, en milisegundos. Define cuándo se intentará reconectar a la pulsera.
-    private var intervaloMinutos =  20 //6
+    //Define cuándo se intentará reconectar a la pulsera.
+    private var intervaloMinutos =  12 //Funcionamiento bueno con 12
     private var intervalo = intervaloMinutos * 60000
 
     private var realizaConexion = false
     private var primeraDescarga = false
+
     private var momento_ultima_descarga : Long = -2
 
     ///////////////////////////////////////////////
@@ -192,13 +199,15 @@ class MyServiceWork : Service() {
         if(intent?.getStringExtra("momento_ultima_descarga") != null){
             Log.d(TAG,"El parametro que se recibe en la creación del servicio es : ${intent?.getStringExtra("momento_ultima_descarga")}")
             momento_ultima_descarga = intent?.getStringExtra("momento_ultima_descarga")!!.toLong()
-        }else{
+        }
+        else{
             Log.d(TAG,"No se recibe el parámetro")
         }
 
         if(intent?.getStringExtra("param") != null){
             Log.d(TAG,"El parametro de prueba es : ${intent?.getStringExtra("param")}")
-        }else{
+        }
+        else{
             Log.d(TAG,"No se recibe el parámetro param")
         }
 
@@ -213,7 +222,6 @@ class MyServiceWork : Service() {
             connectMQTT()
         }
 
-        //enviarMensaje("status","El jobId es ${jobId.toString()}")
         val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
         fileDir  = File(documentsDir, "POLAR")
         Log.d(TAG,"El path es: "+ documentsDir.absolutePath.toString())
@@ -242,8 +250,8 @@ class MyServiceWork : Service() {
             realizaConexion = true
             primeraDescarga = true
             connectToDevice()
-        }else{
-            //if(momento_ultima_descarga + frecuenciaDescarga < startConnectDateMilis){
+        }
+        else{
             if(momento_ultima_descarga + frecuenciaDescarga < System.currentTimeMillis()){ //Han pasado frecuencia_descarga milisegundos desde la última descarga
                 Log.d(TAG, "onStart - No Primera - Descarga - ${momento_ultima_descarga}")
                 enviarMensaje("status","Entra a descargar los datos. No es la primera vez.")
@@ -382,9 +390,11 @@ class MyServiceWork : Service() {
     ///////////////////////////////////////////////
     private fun enviarMensaje(tipo : String, mensaje : String){
         Log.d(TAG, "Entrado en la función ENVIARMENSAJE")
+
         if (mqttConnected){
             connection.publish(mqttTopic,gson.toJson("${deviceId}__${tipo}__${mensaje}").toByteArray(), QoS.AT_LEAST_ONCE, false)
         }
+
         broadcastIntent.putExtra("status", "${deviceId}__${tipo}__${mensaje}")
         val cont = this.applicationContext
         LocalBroadcastManager.getInstance(cont).sendBroadcast(broadcastIntent)
@@ -427,9 +437,11 @@ class MyServiceWork : Service() {
 
     ///////////////////////////////////////////////
     private fun processNextElement(index: Int){
+
         Log.d(TAG, "Entering the processNextElement function")
         var offlineEntry = entryCache[deviceId]?.get(index) ?: null
         var size = entryCache[deviceId]?.size
+
         var fullyExecute = true
         if (offlineEntry != null) {
             val disposable = api.getOfflineRecord(deviceId, offlineEntry, yourSecret)
@@ -942,7 +954,6 @@ class MyServiceWork : Service() {
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
         //Inicialización del tiempo planeado para la próxima conexión
-        //nextConnectDateMilis = startConnectDateMilis + intervalo
         nextConnectDateMilis = System.currentTimeMillis() + intervalo
 
         //Variable param para indicar cuándo fue la última descarga
@@ -963,7 +974,7 @@ class MyServiceWork : Service() {
         }
 
         Log.d(TAG, "Ultima descarga actual:  ${momento_ultima_descarga} Ultima descarga programada: ${param.toString()} Milis = ${System.currentTimeMillis()}")
-        //val intent2 = Intent(this, MyServiceWork::class.java)
+
         val intent2 = Intent(this, AlarmReceiver::class.java)
         intent2.putExtra("momento_ultima_descarga", param.toString())
         intent2.putExtra("param", System.currentTimeMillis().toString())
@@ -972,10 +983,9 @@ class MyServiceWork : Service() {
             nextConnectDateMilis = System.currentTimeMillis() + 10000
         }
 
-        //Sugerencia de chatgpt --> cambiar el request code para que sea único
+        //Request code para que sea único
         val requestCode = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
 
-        //val pendingIntent = PendingIntent.getService(this, requestCode, intent2, FLAG_UPDATE_CURRENT or FLAG_MUTABLE)
         val pendingIntent = PendingIntent.getBroadcast(
             this,
             requestCode,
@@ -1091,3 +1101,5 @@ class MyServiceWork : Service() {
             .build()
     }
 }
+
+///////////////////////////////////////////////////////////////////////////////////////

@@ -38,7 +38,7 @@ import com.polar.sdk.api.PolarBleApiDefaultImpl
 import java.text.SimpleDateFormat
 import java.util.Date
 
-///////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////
 class MainActivityWork : AppCompatActivity() {
 
     companion object {
@@ -108,8 +108,8 @@ class MainActivityWork : AppCompatActivity() {
 
         estatusText.text = "Iniciando..."
 
-        dispositivosClientes["BA057E29"] = "Dispositivo 1"
-        dispositivos.add("BA057E29")
+        dispositivosClientes["C4A50D2E"] = "Dispositivo 1" //C4A50D2E - BA057E29
+        dispositivos.add("C4A50D2E") //C4A50D2E - BA057E29
 
         for(i in 0 until dispositivosClientes.size){
             addItemToBatteryContainer("Battería ${i+1}", "-")
@@ -390,7 +390,6 @@ class MainActivityWork : AppCompatActivity() {
     ///////////////////////////////////////////////
     public override fun onDestroy() {
         super.onDestroy()
-        //api.shutDown()
     }
 
     ///////////////////////////////////////////////
@@ -399,3 +398,5 @@ class MainActivityWork : AppCompatActivity() {
         toast.show()
     }
 }
+
+///////////////////////////////////////////////////////////////////////////////////////
