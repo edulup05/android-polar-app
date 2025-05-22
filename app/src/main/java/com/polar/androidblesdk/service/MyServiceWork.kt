@@ -79,6 +79,8 @@ import java.util.Calendar
 import java.util.Date
 import java.util.UUID
 import kotlin.concurrent.thread
+import io.reactivex.rxjava3.disposables.CompositeDisposable
+import io.reactivex.rxjava3.disposables.Disposable
 
 ///////////////////////////////////////////////////////////////////////////////////////
 class MyServiceWork : Service() {
@@ -173,6 +175,8 @@ class MyServiceWork : Service() {
     private var primeraDescarga = false
 
     private var momento_ultima_descarga : Long = -2
+
+    private val compositeDisposable = CompositeDisposable()
 
     ///////////////////////////////////////////////
     override fun onBind(p0: Intent?): IBinder? {
@@ -269,6 +273,7 @@ class MyServiceWork : Service() {
     ///////////////////////////////////////////////
     public override fun onDestroy() {
         Log.d(TAG, "Se destruye el servicio")
+        compositeDisposable.clear()
         api.shutDown()
         stopSelf()
         super.onDestroy()
@@ -339,7 +344,7 @@ class MyServiceWork : Service() {
             }
             else {
                 Log.d(TAG, "Se acaban de leer las grabaciones. Se va a comprobar el estado de los sensores antes de iniciar nuevas grabaciones.");
-                api.getOfflineRecordingStatus(deviceId)
+                val disposable = api.getOfflineRecordingStatus(deviceId)
                     .observeOn(AndroidSchedulers.mainThread())
                     .subscribe({ statusList ->
                         // statusList: lista de sensores que están grabando ahora mismo
@@ -365,7 +370,7 @@ class MyServiceWork : Service() {
 
                         // Inicia solo los sensores que no estaban grabando ya
                         if (toStart.isNotEmpty()) {
-                            Completable.merge(toStart)
+                            val disposable2 = Completable.merge(toStart)
                                 .subscribeOn(Schedulers.io())
                                 .observeOn(AndroidSchedulers.mainThread())
                                 .subscribe({
@@ -374,7 +379,9 @@ class MyServiceWork : Service() {
                                 }, { error ->
                                     Log.e(TAG, "Error al iniciar las grabaciones: $error")
                                     api.disconnectFromDevice(deviceId)
-                                })
+                                }
+                                )
+                            compositeDisposable.add(disposable2)
                         } else {
                             Log.d(TAG, "Todos los sensores ya estaban grabando, solo se desconecta el dispositivo.")
                             api.disconnectFromDevice(deviceId)
@@ -383,6 +390,7 @@ class MyServiceWork : Service() {
                         Log.e(TAG, "Error al obtener el estado de las grabaciones: $error")
                         api.disconnectFromDevice(deviceId)
                     })
+                compositeDisposable.add(disposable)
             }
         }
     }
@@ -477,7 +485,6 @@ class MyServiceWork : Service() {
                                     fileOutputStream = FileOutputStream(file)
 
                                     Log.d(TAG, "ACC Recording started at ${it.startTime}")
-                                    //val headerLine = "timestamp;x;y;z\n"
 
                                     val headerLine = "constant measurement,${typeSensor}\n" +
                                             "datatype time,long,long,long\n" +
@@ -632,7 +639,7 @@ class MyServiceWork : Service() {
                         Log.d(TAG, fileDir.toString())
                         Log.d(TAG, "File Sent")
 
-                        api.removeOfflineRecord(deviceId, offlineEntry)
+                        val disposable = api.removeOfflineRecord(deviceId, offlineEntry)
                             .observeOn(AndroidSchedulers.mainThread())
                             .subscribe(
                                 {
@@ -645,6 +652,7 @@ class MyServiceWork : Service() {
                                     gestionListaGrabaciones(size, index)
                                 }
                             )
+                        compositeDisposable.add(disposable)
                     },
                     { throwable: Throwable ->
                         Log.e(TAG, "ERROR when calling getOfflineRecord ($index)" + throwable.toString())
@@ -685,12 +693,11 @@ class MyServiceWork : Service() {
                 thread {
                     Log.d(TAG, "Entra en el thread")
                     Thread.sleep(10000)
-                    //api.disconnectFromDevice(deviceId)
                     Log.d(TAG, "Entra en descargar los datos")
                     Log.d(TAG, "El dispositivo conectado es ${deviceId}")
                     initializeMaps()
                     if(activateTrigger){
-                        api.getAvailableOfflineRecordingDataTypes(deviceId)
+                        val disposable = api.getAvailableOfflineRecordingDataTypes(deviceId)
                             .subscribe(
                                 {
                                     Log.d(TAG, "Hay un total de ${it.size.toString()} elementos")
@@ -698,7 +705,7 @@ class MyServiceWork : Service() {
                                     for(element in it){
                                         Log.d(TAG, element.name)
                                     }
-                                    api.setOfflineRecordingTrigger(deviceId, PolarOfflineRecordingTrigger(PolarOfflineRecordingTriggerMode.TRIGGER_SYSTEM_START,triggerFeaturesMap),yourSecret)
+                                    val disposable2 = api.setOfflineRecordingTrigger(deviceId, PolarOfflineRecordingTrigger(PolarOfflineRecordingTriggerMode.TRIGGER_SYSTEM_START,triggerFeaturesMap),yourSecret)
                                         .observeOn(AndroidSchedulers.mainThread())
                                         .subscribe(
                                             {
@@ -706,27 +713,29 @@ class MyServiceWork : Service() {
                                             },
                                             { error: Throwable -> Log.e(TAG, "set time failed: $error") }
                                         )
+                                    compositeDisposable.add(disposable2)
                                 },
                                 { error: Throwable ->
                                     val recordingStatusReadError = "Recording status read failed. Reason: $error"
                                     Log.e(TAG, recordingStatusReadError)
                                 }
                             )
+                        compositeDisposable.add(disposable)
                     }
                     // Paramos la grabación
-                    api.getOfflineRecordingStatus(deviceId).observeOn(AndroidSchedulers.mainThread())
+                    val disposable3 = api.getOfflineRecordingStatus(deviceId).observeOn(AndroidSchedulers.mainThread())
                         .subscribe(
                             {
                                 Log.d(TAG, "Hay un total de: " + it.size.toString() +" grabaciones.")
                                 if(it.isNotEmpty()){
                                     Log.d(TAG, "stopping recording and listing")
-                                    stopAcc()
+                                    val disposable4 = stopAcc()
                                         .subscribeOn(Schedulers.io())
                                         .observeOn(AndroidSchedulers.mainThread())
                                         .subscribe(
                                             {
                                                 Log.e(TAG, "stopAcc() ok")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
+                                                val disposable10 = api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording ACC completed")
@@ -736,9 +745,10 @@ class MyServiceWork : Service() {
                                                                 api.disconnectFromDevice(deviceId)
                                                             }}
                                                     )
+                                                compositeDisposable.add(disposable10)
                                             },
                                             { error: Throwable -> Log.e(TAG, "stopAcc() failed: ${error.message}")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
+                                                val disposable11 = api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording ACC completed")
@@ -747,15 +757,18 @@ class MyServiceWork : Service() {
                                                             if (throwable.toString().contains("CHARGER")){
                                                                 api.disconnectFromDevice(deviceId)
                                                             }}
-                                                    )}
+                                                    )
+                                                compositeDisposable.add(disposable11)
+                                            }
                                         )
-                                    stopGYR()
+                                    compositeDisposable.add(disposable4)
+                                    val disposable5 = stopGYR()
                                         .subscribeOn(Schedulers.io())
                                         .observeOn(AndroidSchedulers.mainThread())
                                         .subscribe(
                                             {
                                                 Log.e(TAG, "stopGYR() ok")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
+                                                val disposable12 = api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording GYRO completed")
@@ -765,9 +778,10 @@ class MyServiceWork : Service() {
                                                                 api.disconnectFromDevice(deviceId)
                                                             }}
                                                     )
+                                                compositeDisposable.add(disposable12)
                                             },
                                             { error: Throwable -> Log.e(TAG, "stopGYR() failed: ${error.message}")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
+                                                val disposable13 = api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording GYRO completed")
@@ -777,15 +791,17 @@ class MyServiceWork : Service() {
                                                                 api.disconnectFromDevice(deviceId)
                                                             }}
                                                     )
+                                                compositeDisposable.add(disposable13)
                                             }
                                         )
-                                    stopPPG()
+                                    compositeDisposable.add(disposable5)
+                                    val disposable6 = stopPPG()
                                         .subscribeOn(Schedulers.io())
                                         .observeOn(AndroidSchedulers.mainThread())
                                         .subscribe(
                                             {
                                                 Log.e(TAG, "stopPPG() ok")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
+                                                val disposable14 = api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording PPG completed")
@@ -795,10 +811,10 @@ class MyServiceWork : Service() {
                                                                 api.disconnectFromDevice(deviceId)
                                                             }}
                                                     )
-
+                                                compositeDisposable.add(disposable14)
                                             },
                                             { error: Throwable -> Log.e(TAG, "stopPPG() failed: ${error.message}")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
+                                                val disposable15 = api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording PPG completed")
@@ -807,11 +823,13 @@ class MyServiceWork : Service() {
                                                             if (throwable.toString().contains("CHARGER")){
                                                                 api.disconnectFromDevice(deviceId)
                                                             }}
-                                                    )}
+                                                    )
+                                                compositeDisposable.add(disposable15)
+                                            }
                                         )
-
+                                    compositeDisposable.add(disposable6)
                                 }else{
-                                    api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
+                                    val disposable7 = api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
                                         .subscribe(
                                             {
                                                 Log.d(TAG, "start offline recording ACC completed")
@@ -822,7 +840,8 @@ class MyServiceWork : Service() {
                                                 }
                                             }
                                         )
-                                    api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
+                                    compositeDisposable.add(disposable7)
+                                    val disposable8 = api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
                                         .subscribe(
                                             {
                                                 Log.d(TAG, "start offline recording GYRO completed")
@@ -834,7 +853,8 @@ class MyServiceWork : Service() {
                                                 }
                                             }
                                         )
-                                    api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
+                                    compositeDisposable.add(disposable8)
+                                    val disposable9 = api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
                                         .subscribe(
                                             {
                                                 Log.d(TAG, "start offline recording PPG completed")
@@ -845,6 +865,7 @@ class MyServiceWork : Service() {
                                                 }
                                             }
                                         )
+                                    compositeDisposable.add(disposable9)
                                 }
                             },
                             { error: Throwable ->
@@ -853,6 +874,7 @@ class MyServiceWork : Service() {
                                 api.disconnectFromDevice(deviceId) //prueba
                             }
                         )
+                    compositeDisposable.add(disposable3)
 
                     // Descargamos los datos de todas las grabaciones
                     val disposable = api.listOfflineRecordings(deviceId)
@@ -1010,6 +1032,8 @@ class MyServiceWork : Service() {
             Log.d(TAG, "El wakelock está activo")
             wakeLock!!.release();
         }
+
+        compositeDisposable.clear()
         stopSelf()
     }
 
