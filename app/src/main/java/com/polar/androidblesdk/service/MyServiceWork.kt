@@ -81,7 +81,6 @@ import java.util.UUID
 import kotlin.concurrent.thread
 
 ///////////////////////////////////////////////
-//class MyServiceWork(context : Context, params : WorkerParameters) : Worker(context, params) {
 class MyServiceWork : Service() {
     val jobId : UUID = UUID.randomUUID()
     private var broadcastIntent = Intent("prueba")
@@ -144,7 +143,6 @@ class MyServiceWork : Service() {
 
     private var activateTrigger = true
     private var minimoTiempoParaProcesarGrabacion = 1000 * 60
-    private var frecuenciaConexion = 10000
     private var deviceId : String= ""
     private var devices: Array<String> = arrayOf("BA057E29")
     private var startConnectDate = ""
@@ -159,10 +157,10 @@ class MyServiceWork : Service() {
     var gson = Gson()
 
     //60 minutos, en milisegundos. Define el tiempo mínimo que debe pasar entre una descarga y la siguiente.
-    private var frecuenciaDescarga = 20 * 60000 //6
+    private var frecuenciaDescarga = 40 * 60000 //8
 
     //10 minutos, en milisegundos. Define cuándo se intentará reconectar a la pulsera.
-    private var intervaloMinutos =  10 //2
+    private var intervaloMinutos =  20 //6
     private var intervalo = intervaloMinutos * 60000
 
     private var realizaConexion = false
@@ -245,7 +243,8 @@ class MyServiceWork : Service() {
             primeraDescarga = true
             connectToDevice()
         }else{
-            if(momento_ultima_descarga + frecuenciaDescarga < startConnectDateMilis){
+            //if(momento_ultima_descarga + frecuenciaDescarga < startConnectDateMilis){
+            if(momento_ultima_descarga + frecuenciaDescarga < System.currentTimeMillis()){ //Han pasado frecuencia_descarga milisegundos desde la última descarga
                 Log.d(TAG, "onStart - No Primera - Descarga - ${momento_ultima_descarga}")
                 enviarMensaje("status","Entra a descargar los datos. No es la primera vez.")
                 realizaConexion = true
@@ -320,7 +319,8 @@ class MyServiceWork : Service() {
         Log.d(TAG, "Size = ${size}. Index = ${index}")
         if (size != null) {
             enviarMensaje("status","Descargando datos. Descargado ${index +1}/${size}.")
-            if (index != size - 1) {
+            //if (index != size - 1) {
+            if ((index + 1) < (size ?: 0)) {
                 Log.d(TAG, "Processing the next function")
                 try{
                     processNextElement(index + 1)
@@ -328,51 +328,7 @@ class MyServiceWork : Service() {
                     Log.d(TAG, "Error al llamar a la función processNextElement "+e.toString())
                     api.disconnectFromDevice(deviceId)
                 }
-            } /* versión 1
-                else {
-                Log.d(TAG, "Se acaban de leer las grabaciones. Se desconecta y se finaliza el servicio. ")
-                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
-                    .subscribe(
-                        {
-                            Log.d(TAG, "start offline recording ACC completed")
-                        },
-                        { throwable: Throwable -> Log.e(TAG, "start offline ACC failed " + throwable.toString()) }
-                    )
-                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
-                    .subscribe(
-                        {
-                            Log.d(TAG, "start offline recording GYRO completed")
-                        },
-                        { throwable: Throwable -> Log.e(TAG, "start offline GYRO failed " + throwable.toString()) }
-                    )
-                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
-                    .subscribe(
-                        {
-                            Log.d(TAG, "start offline recording PPG completed")
-                        },
-                        { throwable: Throwable -> Log.e(TAG, "start offline PPG failed " + throwable.toString()) }
-                    )
-                api.disconnectFromDevice(deviceId)
-            }*/
-            /* versión 2
-            else {
-                Log.d(TAG, "Se acaban de leer las grabaciones. Se desconecta y se finaliza el servicio. ")
-                // Usamos mergeArray para esperar a que todas finalicen antes de desconectar
-                Completable.mergeArray(
-                    api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret),
-                    api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret),
-                    api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
-                )
-                    .subscribeOn(Schedulers.io())
-                    .observeOn(AndroidSchedulers.mainThread())
-                    .subscribe({
-                        Log.d(TAG, "Todas las grabaciones han sido iniciadas correctamente, desconectando el dispositivo.")
-                        api.disconnectFromDevice(deviceId)
-                    }, { error ->
-                        Log.e(TAG, "Error al iniciar las grabaciones: $error")
-                        api.disconnectFromDevice(deviceId) // Si alguna falla, también desconectamos (puedes cambiar este comportamiento)
-                    })
-            }*/
+            }
             else {
                 Log.d(TAG, "Se acaban de leer las grabaciones. Se va a comprobar el estado de los sensores antes de iniciar nuevas grabaciones.");
                 api.getOfflineRecordingStatus(deviceId)
@@ -711,17 +667,6 @@ class MyServiceWork : Service() {
                 Log.e(TAG, "Comprobación. Error al conectar el dispositivo ${indexDeviceId + 1}. Current deviceId = ${deviceId}")
                 enviarMensaje("status","No se ha podido conectar con el dispositivo ${indexDeviceId + 1}.")
                 enviarMensaje("battery","")
-                //thread {
-                //    Thread.sleep(5000)
-                //    if(indexDeviceId+1 < devices.size){
-                //        indexDeviceId += 1
-                //        deviceId = devices[indexDeviceId]
-                //        autoConnectFunction()
-                //    }else{
-                //        terminarEjecucion()
-                //    }
-                //    return@thread
-                //}
                 terminarEjecucion()
             }else{
                 Log.d(TAG, "Para durante 10 segs la ejecución")
@@ -941,7 +886,6 @@ class MyServiceWork : Service() {
         Log.d(TAG, "Estoy dentro del constructor del servicio. Se inicia todo. ")
         api.setPolarFilter(true)
         api.setAutomaticReconnection(false)
-        // If there is need to log what is happening inside the SDK, it can be enabled like this:
         val enableSdkLogs = false
         if(enableSdkLogs) {
             api.setApiLogger { s: String -> Log.d(API_LOGGER_TAG, s) }
@@ -998,7 +942,8 @@ class MyServiceWork : Service() {
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
         //Inicialización del tiempo planeado para la próxima conexión
-        nextConnectDateMilis = startConnectDateMilis + intervalo
+        //nextConnectDateMilis = startConnectDateMilis + intervalo
+        nextConnectDateMilis = System.currentTimeMillis() + intervalo
 
         //Variable param para indicar cuándo fue la última descarga
         var param : Long = -1
@@ -1038,10 +983,9 @@ class MyServiceWork : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
 
-
         alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextConnectDateMilis, pendingIntent)
 
-        Log.d(TAG, "Se programa la llamada. Tiempo actual = ${startConnectDateMilis}. Siguiente: ${nextConnectDateMilis}")
+        Log.d(TAG, "Se programa la llamada. Tiempo actual = ${startConnectDateMilis}. Siguiente: ${obtenerHoraFormateada(nextConnectDateMilis)}")
         if(mqttConnected) this.connection.publish(mqttTopic, gson.toJson("Ha entrado en el servicio, y se ha programado una nueva llamada").toByteArray(), QoS.AT_MOST_ONCE, false)
 
         if(realizaConexion){
