@@ -108,8 +108,8 @@ class MainActivityWork : AppCompatActivity() {
 
         estatusText.text = "Iniciando..."
 
-        dispositivosClientes["BA057E29"] = "Dispositivo 1"
-        dispositivos.add("BA057E29")
+        dispositivosClientes["C4A50D2E"] = "Dispositivo 1" //BA057E29 - C4A50D2E
+        dispositivos.add("C4A50D2E")
 
         for(i in 0 until dispositivosClientes.size){
             addItemToBatteryContainer("Battería ${i+1}", "-")
@@ -123,13 +123,16 @@ class MainActivityWork : AppCompatActivity() {
         val intentFilter = IntentFilter("prueba")
         LocalBroadcastManager.getInstance(this).registerReceiver(broadcastReceiver, intentFilter)
 
-        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        /*val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val intent = Intent(this, AlarmReceiver::class.java)
         intent.putExtra("momento_ultima_descarga", "-1")
         val pendingIntent = PendingIntent.getBroadcast(this, 0, intent, FLAG_MUTABLE)
         Log.d(TAG, "antes de llamar la alarma en el proceso general")
+        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, 1, pendingIntent)*/
 
-        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, 1, pendingIntent)
+        val millis = System.currentTimeMillis() + 10_000 // Espera de 10 segundos
+        programarAlarmaDescarga(this, millis)
+
 
         wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
             newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MainActivityWork::lock").apply {
@@ -265,6 +268,22 @@ class MainActivityWork : AppCompatActivity() {
         val intent = Intent("com.polar.CARBOHIDRATOS")
         intent.putExtra("carbohidratos_json", json)
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+    }
+
+    ///////////////////////////////////////////////
+    private fun programarAlarmaDescarga(context: Context, millis: Long) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(context, AlarmReceiver::class.java)
+        intent.putExtra("momento_ultima_descarga", "-1")
+        val pendingIntent = PendingIntent.getBroadcast(
+            context, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+        alarmManager.setExactAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            millis,
+            pendingIntent
+        )
     }
 
     ///////////////////////////////////////////////

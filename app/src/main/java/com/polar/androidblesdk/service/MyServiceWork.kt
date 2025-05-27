@@ -146,7 +146,7 @@ class MyServiceWork : Service() {
     private var minimoTiempoParaProcesarGrabacion = 1000 * 60
     private var frecuenciaConexion = 10000
     private var deviceId : String= ""
-    private var devices: Array<String> = arrayOf("BA057E29")
+    private var devices: Array<String> = arrayOf("C4A50D2E") //BA057E29 - C4A50D2E
     private var startConnectDate = ""
     private var startConnectDateMilis = System.currentTimeMillis()
     private var nextConnectDateMilis = System.currentTimeMillis()
@@ -159,10 +159,10 @@ class MyServiceWork : Service() {
     var gson = Gson()
 
     //60 minutos, en milisegundos. Define el tiempo mínimo que debe pasar entre una descarga y la siguiente.
-    private var frecuenciaDescarga = 20 * 60000 //6
+    private var frecuenciaDescarga = 30 * 60000 //20
 
     //10 minutos, en milisegundos. Define cuándo se intentará reconectar a la pulsera.
-    private var intervaloMinutos =  10 //2
+    private var intervaloMinutos =  20 //10
     private var intervalo = intervaloMinutos * 60000
 
     private var realizaConexion = false
@@ -190,6 +190,7 @@ class MyServiceWork : Service() {
     ///////////////////////////////////////////////
     public override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG,"🛠️ onStartCommand executed with startId: $startId - MyServiceWork")
+        startConnectDateMilis = System.currentTimeMillis() //**
 
         if(intent?.getStringExtra("momento_ultima_descarga") != null){
             Log.d(TAG,"El parametro que se recibe en la creación del servicio es : ${intent?.getStringExtra("momento_ultima_descarga")}")
@@ -241,6 +242,8 @@ class MyServiceWork : Service() {
             momento_ultima_descarga = System.currentTimeMillis()
             Log.d(TAG, "onStart - Primera - ${momento_ultima_descarga}")
             enviarMensaje("status","Entra a descargar los datos. Es la primera vez.")
+
+
             realizaConexion = true
             primeraDescarga = true
             connectToDevice()
@@ -265,6 +268,24 @@ class MyServiceWork : Service() {
         api.shutDown()
         stopSelf()
         super.onDestroy()
+    }
+
+    //Prueba para que no se quede ejecutanose la app cuando la borramos de las pestañas Android
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.d(TAG, "onTaskRemoved: El usuario ha quitado la app de recientes, paro el servicio.")
+        cancelarAlarmaDescarga()
+        api.shutDown()
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
+    private fun cancelarAlarmaDescarga() {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, AlarmReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+        alarmManager.cancel(pendingIntent)
     }
 
     ///////////////////////////////////////////////
@@ -678,7 +699,7 @@ class MyServiceWork : Service() {
                                 }
                             )
                     },
-                    { throwable: Throwable ->
+                    /*{ throwable: Throwable ->
                         Log.e(TAG, "ERROR when calling getOfflineRecord ($index)" + throwable.toString())
                         if(throwable.toString().contains("isconnected")){
                             if (size != null) {
@@ -689,6 +710,39 @@ class MyServiceWork : Service() {
                             }
                         }else{
                             gestionListaGrabaciones(size, index)
+                        }
+                    }*/
+                    { throwable: Throwable ->
+                        Log.e(TAG, "ERROR when calling getOfflineRecord ($index): ${throwable}")
+
+                        when {
+                            throwable.toString().contains("PmdFrameType cannot be parsed") ||
+                                    throwable.toString().contains("OfflineRecordingErrorMetaDataParseFailed") ||
+                                    throwable.toString().contains("UNIDENTIFIED_DEVICE_ERROR") -> {
+                                Log.e(TAG, "Archivo corrupto/no soportado/antiguo, se borra si es posible.")
+                                api.removeOfflineRecord(deviceId, offlineEntry)
+                                    .observeOn(AndroidSchedulers.mainThread())
+                                    .subscribe(
+                                        {
+                                            Log.d(TAG, "Archivo problemático borrado correctamente ($index) ${offlineEntry?.path}")
+                                            gestionListaGrabaciones(size, index)
+                                        },
+                                        { error ->
+                                            Log.e(TAG, "Error borrando archivo problemático ($index): ${offlineEntry?.path} $error")
+                                            gestionListaGrabaciones(size, index)
+                                        }
+                                    )
+                            }
+                            throwable.toString().contains("isconnected") -> {
+                                if (size != null) {
+                                    gestionListaGrabaciones(size, size-1)
+                                } else {
+                                    gestionListaGrabaciones(size, index)
+                                }
+                            }
+                            else -> {
+                                gestionListaGrabaciones(size, index)
+                            }
                         }
                     }
                 )
@@ -705,23 +759,12 @@ class MyServiceWork : Service() {
             Log.d(TAG,"continua  "+deviceId)
         }
         thread{
-            Thread.sleep(7000)
+            Thread.sleep(15000)
             Log.d(TAG,"segunda comprobación si está conectado  "+deviceId)
             if(!deviceConnected){
                 Log.e(TAG, "Comprobación. Error al conectar el dispositivo ${indexDeviceId + 1}. Current deviceId = ${deviceId}")
                 enviarMensaje("status","No se ha podido conectar con el dispositivo ${indexDeviceId + 1}.")
                 enviarMensaje("battery","")
-                //thread {
-                //    Thread.sleep(5000)
-                //    if(indexDeviceId+1 < devices.size){
-                //        indexDeviceId += 1
-                //        deviceId = devices[indexDeviceId]
-                //        autoConnectFunction()
-                //    }else{
-                //        terminarEjecucion()
-                //    }
-                //    return@thread
-                //}
                 terminarEjecucion()
             }else{
                 Log.d(TAG, "Para durante 10 segs la ejecución")
@@ -1028,7 +1071,8 @@ class MyServiceWork : Service() {
         }
 
         //Sugerencia de chatgpt --> cambiar el request code para que sea único
-        val requestCode = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+        //val requestCode = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+        val requestCode = 0
 
         //val pendingIntent = PendingIntent.getService(this, requestCode, intent2, FLAG_UPDATE_CURRENT or FLAG_MUTABLE)
         val pendingIntent = PendingIntent.getBroadcast(
@@ -1038,10 +1082,9 @@ class MyServiceWork : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
 
-
         alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, nextConnectDateMilis, pendingIntent)
 
-        Log.d(TAG, "Se programa la llamada. Tiempo actual = ${startConnectDateMilis}. Siguiente: ${nextConnectDateMilis}")
+        Log.d(TAG, "Se programa la llamada. Tiempo actual = ${obtenerHoraFormateada(startConnectDateMilis)}. Siguiente: ${obtenerHoraFormateada(nextConnectDateMilis)}")
         if(mqttConnected) this.connection.publish(mqttTopic, gson.toJson("Ha entrado en el servicio, y se ha programado una nueva llamada").toByteArray(), QoS.AT_MOST_ONCE, false)
 
         if(realizaConexion){
