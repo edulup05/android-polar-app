@@ -108,8 +108,8 @@ class MainActivityWork : AppCompatActivity() {
 
         estatusText.text = "Iniciando..."
 
-        dispositivosClientes["C4A50D2E"] = "Dispositivo 1" //BA057E29 - C4A50D2E
-        dispositivos.add("C4A50D2E")
+        dispositivosClientes["BA057E29"] = "Dispositivo 1" //BA057E29 - C4A50D2E
+        dispositivos.add("BA057E29")
 
         for(i in 0 until dispositivosClientes.size){
             addItemToBatteryContainer("Battería ${i+1}", "-")
