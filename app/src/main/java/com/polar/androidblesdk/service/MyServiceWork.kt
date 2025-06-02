@@ -2,6 +2,7 @@ package com.polar.androidblesdk.service
 
 //PROYECTO (ACTUAL)
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlarmManager
@@ -13,6 +14,7 @@ import android.app.PendingIntent.FLAG_IMMUTABLE
 import android.app.PendingIntent.FLAG_MUTABLE
 import android.app.PendingIntent.FLAG_UPDATE_CURRENT
 import android.app.Service
+import android.bluetooth.BluetoothAdapter
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -43,6 +45,7 @@ import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import androidx.annotation.RequiresPermission
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -79,13 +82,13 @@ import java.util.Calendar
 import java.util.Date
 import java.util.UUID
 import kotlin.concurrent.thread
-
-///////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 //class MyServiceWork(context : Context, params : WorkerParameters) : Worker(context, params) {
 class MyServiceWork : Service() {
     val jobId : UUID = UUID.randomUUID()
     private var broadcastIntent = Intent("prueba")
 
+    ///////////////////////////////////////////////
     companion object {
         public const val TAG = "Service"
         private const val API_LOGGER_TAG = "API LOGGER"
@@ -94,6 +97,7 @@ class MyServiceWork : Service() {
         var isPolarConnecting = false
     }
 
+    ///////////////////////////////////////////////
     private val insulinaReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val insulinaJson = intent?.getStringExtra("insulina_json")
@@ -103,6 +107,7 @@ class MyServiceWork : Service() {
         }
     }
 
+    ///////////////////////////////////////////////
     private val carbohidratosReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val json = intent?.getStringExtra("carbohidratos_json")
@@ -112,19 +117,8 @@ class MyServiceWork : Service() {
         }
     }
 
-    private val api: PolarBleApi by lazy {
-        // Notice all features are enabled
-        PolarBleApiDefaultImpl.defaultImplementation(
-            applicationContext,
-            setOf(
-                PolarBleApi.PolarBleSdkFeature.FEATURE_HR,
-                PolarBleApi.PolarBleSdkFeature.FEATURE_BATTERY_INFO,
-                PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_OFFLINE_RECORDING,
-                PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_DEVICE_TIME_SETUP,
-                PolarBleApi.PolarBleSdkFeature.FEATURE_DEVICE_INFO
-            )
-        )
-    }
+    ///////////////////////////////////////////////
+    private var api: PolarBleApi? = null
 
     private var yourSecret =  PolarRecordingSecret(
         kotlin.byteArrayOf(
@@ -133,40 +127,48 @@ class MyServiceWork : Service() {
         )
     )
 
+    ///////////////////////////////////////////////
     private lateinit var settingsACC : MutableMap<PolarSensorSetting.SettingType, Int>
     private lateinit var settingsGYRO : MutableMap<PolarSensorSetting.SettingType, Int>
     private lateinit var settingsPPG : MutableMap<PolarSensorSetting.SettingType, Int>
     private lateinit var triggerFeaturesMap: Map<PolarBleApi.PolarDeviceDataType, PolarSensorSetting?>
     private lateinit var fileDir : File
 
+    ///////////////////////////////////////////////
     private val entryCache: MutableMap<String, MutableList<PolarOfflineRecordingEntry>> = mutableMapOf()
     private lateinit var handler: Handler
 
     private var deviceConnected = false
-
     private var activateTrigger = true
+
     private var minimoTiempoParaProcesarGrabacion = 1000 * 60
     private var frecuenciaConexion = 10000
+
     private var deviceId : String= ""
     private var devices: Array<String> = arrayOf("BA057E29") //BA057E29 - C4A50D2E
+    private var indexDeviceId = 0
+
     private var startConnectDate = ""
     private var startConnectDateMilis = System.currentTimeMillis()
     private var nextConnectDateMilis = System.currentTimeMillis()
-    private var indexDeviceId = 0
+
     private var wakeLock: PowerManager.WakeLock? = null
+
     private var mqttServerURI = "tcp://16.171.152.69:1883"
     private var mqttTopic = "polar/"
-    private lateinit var connection: BlockingConnection
     private var mqttConnected = false
+
+    private lateinit var connection: BlockingConnection
     var gson = Gson()
 
-    //60 minutos, en milisegundos. Define el tiempo mínimo que debe pasar entre una descarga y la siguiente.
-    private var frecuenciaDescarga = 16 * 60000 //30 - 8
+    //30 minutos, en milisegundos. Define el tiempo mínimo que debe pasar entre una descarga y la siguiente.
+    private var frecuenciaDescarga = 30 * 60000 //40 - 8
 
-    //10 minutos, en milisegundos. Define cuándo se intentará reconectar a la pulsera.
-    private var intervaloMinutos =  6 //20 - 3
+    //16 minutos, en milisegundos. Define cuándo se intentará reconectar a la pulsera.
+    private var intervaloMinutos =  16 //20 - 4
     private var intervalo = intervaloMinutos * 60000
 
+    ///////////////////////////////////////////////
     private var realizaConexion = false
     private var primeraDescarga = false
     private var momento_ultima_descarga : Long = -2
@@ -190,9 +192,55 @@ class MyServiceWork : Service() {
     }
 
     ///////////////////////////////////////////////
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
     public override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG,"🛠️ onStartCommand executed with startId: $startId - MyServiceWork")
-        startConnectDateMilis = System.currentTimeMillis() //**
+        startConnectDateMilis = System.currentTimeMillis()
+
+
+        if (!isBluetoothAvailable()) {
+            enviarMensaje("status", "Bluetooth no disponible o no activado. Actívalo e inténtalo de nuevo.")
+            terminarEjecucion()
+            return START_NOT_STICKY
+        }
+
+        // Autoreinicio de bluetooth
+        try {
+            Log.d(TAG, "Auto-reinicio de Bluetooth antes de crear la API Polar")
+            api?.shutDown()   // Si existe, cerramos antes de reiniciar BLE
+            api = null
+            val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
+            if (bluetoothAdapter != null && bluetoothAdapter.isEnabled) {
+                bluetoothAdapter.disable()
+                Thread.sleep(1800)
+                bluetoothAdapter.enable()
+                Thread.sleep(1800)
+                if (!bluetoothAdapter.isEnabled) {
+                    enviarMensaje("status", "No se pudo reactivar Bluetooth automáticamente. Cancelo ejecución.")
+                    terminarEjecucion()
+                    return START_NOT_STICKY
+                }
+                Log.d(TAG, "Bluetooth reiniciado correctamente.")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reiniciando Bluetooth: ${e.message}")
+            enviarMensaje("status", "Error reiniciando Bluetooth: ${e.message}")
+            terminarEjecucion()
+            return START_NOT_STICKY
+        }
+
+        if (api == null) {
+            api = PolarBleApiDefaultImpl.defaultImplementation(
+                applicationContext,
+                setOf(
+                    PolarBleApi.PolarBleSdkFeature.FEATURE_HR,
+                    PolarBleApi.PolarBleSdkFeature.FEATURE_BATTERY_INFO,
+                    PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_OFFLINE_RECORDING,
+                    PolarBleApi.PolarBleSdkFeature.FEATURE_POLAR_DEVICE_TIME_SETUP,
+                    PolarBleApi.PolarBleSdkFeature.FEATURE_DEVICE_INFO
+                )
+            )
+        }
 
         if(intent?.getStringExtra("momento_ultima_descarga") != null){
             Log.d(TAG,"El parametro que se recibe en la creación del servicio es : ${intent?.getStringExtra("momento_ultima_descarga")}")
@@ -208,15 +256,11 @@ class MyServiceWork : Service() {
         }
 
         wakeLock =
-            (getSystemService(Context.POWER_SERVICE) as PowerManager).run {
-                newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyServiceWork::lock").apply {
-                    acquire()
-                }
+            (getSystemService(POWER_SERVICE) as PowerManager).run {
+                newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyServiceWork::lock").apply { acquire() }
             }
 
-        if (isInternetAvailable()) {
-            connectMQTT()
-        }
+        if (isInternetAvailable()) { connectMQTT() }
 
         //enviarMensaje("status","El jobId es ${jobId.toString()}")
         val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
@@ -244,12 +288,11 @@ class MyServiceWork : Service() {
             momento_ultima_descarga = System.currentTimeMillis()
             Log.d(TAG, "onStart - Primera - ${momento_ultima_descarga}")
             enviarMensaje("status","Entra a descargar los datos. Es la primera vez.")
-
-
             realizaConexion = true
             primeraDescarga = true
             connectToDevice()
-        }else{
+        }
+        else{
             if(momento_ultima_descarga + frecuenciaDescarga < startConnectDateMilis){
                 Log.d(TAG, "onStart - No Primera - Descarga - ${momento_ultima_descarga}")
                 enviarMensaje("status","Entra a descargar los datos. No es la primera vez.")
@@ -261,28 +304,39 @@ class MyServiceWork : Service() {
                 terminarEjecucion()
             }
         }
+
         return START_STICKY
     }
 
     ///////////////////////////////////////////////
     public override fun onDestroy() {
         Log.d(TAG, "Se destruye el servicio")
-        api.shutDown()
+
+        try {
+            api?.shutDown()
+            api = null
+            Log.d(TAG, "api shutDown y puesta a null en onDestroy()")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error al hacer shutDown del api: ${e.message}")
+        }
+
         isPolarConnecting = false
         stopSelf()
         super.onDestroy()
     }
 
+    ///////////////////////////////////////////////
     //Prueba para que no se quede ejecutanose la app cuando la borramos de las pestañas Android
     override fun onTaskRemoved(rootIntent: Intent?) {
         Log.d(TAG, "onTaskRemoved: El usuario ha quitado la app de recientes, paro el servicio.")
         cancelarAlarmaDescarga()
+        api?.shutDown()
         isPolarConnecting = false
-        api.shutDown()
         stopSelf()
         super.onTaskRemoved(rootIntent)
     }
 
+    ///////////////////////////////////////////////
     private fun cancelarAlarmaDescarga() {
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val intent = Intent(this, AlarmReceiver::class.java)
@@ -310,6 +364,27 @@ class MyServiceWork : Service() {
     }
 
     ///////////////////////////////////////////////
+    private fun isBluetoothAvailable(): Boolean {
+        val bluetoothAdapter = android.bluetooth.BluetoothAdapter.getDefaultAdapter()
+        // ¿Soporta Bluetooth?
+        if (bluetoothAdapter == null) {
+            Log.e(TAG, "El dispositivo NO soporta Bluetooth")
+            return false
+        }
+        // ¿Está activado?
+        if (!bluetoothAdapter.isEnabled) {
+            Log.e(TAG, "El Bluetooth NO está activado")
+            return false
+        }
+        // ¿Soporta BLE?
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
+            Log.e(TAG, "El dispositivo NO soporta Bluetooth LE")
+            return false
+        }
+        return true
+    }
+
+    ///////////////////////////////////////////////
     fun isInternetAvailable(): Boolean {
         val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         val network = connectivityManager.activeNetwork ?: return false
@@ -320,14 +395,14 @@ class MyServiceWork : Service() {
     ///////////////////////////////////////////////
     private fun stopAcc(): Completable {
         Log.d(TAG, "Stops ACC recording")
-        return api.stopOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC)
+        return api!!.stopOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC)
             .doOnComplete { Log.d(TAG, "stop offline ACC recording completed") }
     }
 
     ///////////////////////////////////////////////
     private fun stopPPG(): Completable {
         Log.d(TAG, "Stops PPG recording")
-        return api.stopOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG)
+        return api!!.stopOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG)
             .doOnComplete { Log.d(TAG, "stop offline PPG recording completed") }
     }
 
@@ -335,7 +410,7 @@ class MyServiceWork : Service() {
     private fun stopGYR(): Completable {
         //Example of starting GYRO offline recording
         Log.d(TAG, "Stops GYRO recording")
-        return api.stopOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO)
+        return api!!.stopOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO)
             .doOnComplete { Log.d(TAG, "stop offline GYRO recording completed") }
     }
 
@@ -351,32 +426,32 @@ class MyServiceWork : Service() {
                     processNextElement(index + 1)
                 }catch(e : Exception){
                     Log.d(TAG, "Error al llamar a la función processNextElement "+e.toString())
-                    api.disconnectFromDevice(deviceId)
+                    api?.disconnectFromDevice(deviceId)
                     isPolarConnecting = false
                 }
             }
             else {
                 Log.d(TAG, "Se acaban de leer las grabaciones. Se va a comprobar el estado de los sensores antes de iniciar nuevas grabaciones.");
-                api.getOfflineRecordingStatus(deviceId)
+                api!!.getOfflineRecordingStatus(deviceId)
                     .observeOn(AndroidSchedulers.mainThread())
                     .subscribe({ statusList ->
                         // statusList: lista de sensores que están grabando ahora mismo
                         val toStart = mutableListOf<Completable>()
                         if (statusList.none { it == PolarBleApi.PolarDeviceDataType.ACC }) {
                             Log.d(TAG, "ACC no está grabando, se inicia.");
-                            toStart.add(api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret))
+                            toStart.add(api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret))
                         } else {
                             Log.d(TAG, "ACC ya estaba grabando, no se reinicia.");
                         }
                         if (statusList.none { it == PolarBleApi.PolarDeviceDataType.GYRO }) {
                             Log.d(TAG, "GYRO no está grabando, se inicia.");
-                            toStart.add(api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret))
+                            toStart.add(api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret))
                         } else {
                             Log.d(TAG, "GYRO ya estaba grabando, no se reinicia.");
                         }
                         if (statusList.none { it == PolarBleApi.PolarDeviceDataType.PPG }) {
                             Log.d(TAG, "PPG no está grabando, se inicia.");
-                            toStart.add(api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret))
+                            toStart.add(api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret))
                         } else {
                             Log.d(TAG, "PPG ya estaba grabando, no se reinicia.");
                         }
@@ -388,20 +463,20 @@ class MyServiceWork : Service() {
                                 .observeOn(AndroidSchedulers.mainThread())
                                 .subscribe({
                                     Log.d(TAG, "Grabaciones iniciadas correctamente, desconectando el dispositivo.")
-                                    api.disconnectFromDevice(deviceId)
+                                    api?.disconnectFromDevice(deviceId)
                                 }, { error ->
                                     Log.e(TAG, "Error al iniciar las grabaciones: $error")
-                                    api.disconnectFromDevice(deviceId)
+                                    api?.disconnectFromDevice(deviceId)
                                     isPolarConnecting = false
                                 })
                         } else {
                             Log.d(TAG, "Todos los sensores ya estaban grabando, solo se desconecta el dispositivo.")
-                            api.disconnectFromDevice(deviceId)
+                            api?.disconnectFromDevice(deviceId)
                             isPolarConnecting = false
                         }
                     }, { error ->
                         Log.e(TAG, "Error al obtener el estado de las grabaciones: $error")
-                        api.disconnectFromDevice(deviceId)
+                        api?.disconnectFromDevice(deviceId)
                         isPolarConnecting = false
                     })
             }
@@ -461,7 +536,7 @@ class MyServiceWork : Service() {
         var size = entryCache[deviceId]?.size
         var fullyExecute = true
         if (offlineEntry != null) {
-            val disposable = api.getOfflineRecord(deviceId, offlineEntry, yourSecret)
+            val disposable = api!!.getOfflineRecord(deviceId, offlineEntry, yourSecret)
                 .subscribe(
                     {
                         Log.d(TAG, "Recording ($index) ${offlineEntry.path} downloaded. Size: ${offlineEntry.size}")
@@ -649,7 +724,7 @@ class MyServiceWork : Service() {
                         Log.d(TAG, fileDir.toString())
                         Log.d(TAG, "File Sent")
 
-                        api.removeOfflineRecord(deviceId, offlineEntry)
+                        api!!.removeOfflineRecord(deviceId, offlineEntry)
                             .observeOn(AndroidSchedulers.mainThread())
                             .subscribe(
                                 {
@@ -669,9 +744,12 @@ class MyServiceWork : Service() {
                         when {
                             throwable.toString().contains("PmdFrameType cannot be parsed") ||
                                     throwable.toString().contains("OfflineRecordingErrorMetaDataParseFailed") ||
-                                    throwable.toString().contains("UNIDENTIFIED_DEVICE_ERROR") -> {
+                                    throwable.toString().contains("OfflineRecordingNoPayloadData") ||
+                                    throwable.toString().contains("UNIDENTIFIED_DEVICE_ERROR") ||
+                                    throwable.toString().contains("PftpOperationTimeout") ||
+                                    throwable.toString().contains("Air packet was not received in required timeline") -> {
                                 Log.e(TAG, "Archivo corrupto/no soportado/antiguo, se borra si es posible.")
-                                api.removeOfflineRecord(deviceId, offlineEntry)
+                                api!!.removeOfflineRecord(deviceId, offlineEntry)
                                     .observeOn(AndroidSchedulers.mainThread())
                                     .subscribe(
                                         {
@@ -680,7 +758,17 @@ class MyServiceWork : Service() {
                                         },
                                         { error ->
                                             Log.e(TAG, "Error borrando archivo problemático ($index): ${offlineEntry?.path} $error")
-                                            gestionListaGrabaciones(size, index)
+                                            // Si el error es por desconexión, termina la ejecución
+                                            if (error.toString().contains("PolarServiceNotAvailable") ||
+                                                error.toString().contains("PolarDeviceDisconnected")) {
+                                                Log.e(TAG, "Servicio/dispositivo desconectado tras intentar borrar el archivo. Terminando proceso.")
+                                                enviarMensaje("status", "Servicio/dispositivo desconectado tras intentar borrar archivo.")
+                                                isPolarConnecting = false
+                                                try { api?.disconnectFromDevice(deviceId) } catch (_: Exception) {}
+                                                terminarEjecucion()
+                                            } else {
+                                                gestionListaGrabaciones(size, index)
+                                            }
                                         }
                                     )
                             }
@@ -706,7 +794,7 @@ class MyServiceWork : Service() {
             Log.d(TAG,"Se está intentando conectar a "+deviceId)
             deviceId = devices[indexDeviceId]
             enviarMensaje("status","Se está intentando conectar con el dispositivo ${indexDeviceId +1}.")
-            api.connectToDevice(deviceId)
+            api?.connectToDevice(deviceId)
             Log.d(TAG,"continua  "+deviceId)
         }
         thread{
@@ -729,7 +817,7 @@ class MyServiceWork : Service() {
                     Log.d(TAG, "El dispositivo conectado es ${deviceId}")
                     initializeMaps()
                     if(activateTrigger){
-                        api.getAvailableOfflineRecordingDataTypes(deviceId)
+                        api!!.getAvailableOfflineRecordingDataTypes(deviceId)
                             .subscribe(
                                 {
                                     Log.d(TAG, "Hay un total de ${it.size.toString()} elementos")
@@ -737,7 +825,7 @@ class MyServiceWork : Service() {
                                     for(element in it){
                                         Log.d(TAG, element.name)
                                     }
-                                    api.setOfflineRecordingTrigger(deviceId, PolarOfflineRecordingTrigger(PolarOfflineRecordingTriggerMode.TRIGGER_SYSTEM_START,triggerFeaturesMap),yourSecret)
+                                    api!!.setOfflineRecordingTrigger(deviceId, PolarOfflineRecordingTrigger(PolarOfflineRecordingTriggerMode.TRIGGER_SYSTEM_START,triggerFeaturesMap),yourSecret)
                                         .observeOn(AndroidSchedulers.mainThread())
                                         .subscribe(
                                             {
@@ -753,7 +841,7 @@ class MyServiceWork : Service() {
                             )
                     }
                     // Paramos la grabación
-                    api.getOfflineRecordingStatus(deviceId).observeOn(AndroidSchedulers.mainThread())
+                    api!!.getOfflineRecordingStatus(deviceId).observeOn(AndroidSchedulers.mainThread())
                         .subscribe(
                             {
                                 Log.d(TAG, "Hay un total de: " + it.size.toString() +" grabaciones.")
@@ -765,26 +853,26 @@ class MyServiceWork : Service() {
                                         .subscribe(
                                             {
                                                 Log.e(TAG, "stopAcc() ok")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
+                                                api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording ACC completed")
                                                         },
                                                         { throwable: Throwable -> Log.e(TAG, "start offline ACC failed " + throwable.toString())
                                                             if (throwable.toString().contains("CHARGER")){
-                                                                api.disconnectFromDevice(deviceId)
+                                                                api?.disconnectFromDevice(deviceId)
                                                             }}
                                                     )
                                             },
                                             { error: Throwable -> Log.e(TAG, "stopAcc() failed: ${error.message}")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
+                                                api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording ACC completed")
                                                         },
                                                         { throwable: Throwable -> Log.e(TAG, "start offline ACC failed " + throwable.toString())
                                                             if (throwable.toString().contains("CHARGER")){
-                                                                api.disconnectFromDevice(deviceId)
+                                                                api?.disconnectFromDevice(deviceId)
                                                             }}
                                                     )}
                                         )
@@ -794,26 +882,26 @@ class MyServiceWork : Service() {
                                         .subscribe(
                                             {
                                                 Log.e(TAG, "stopGYR() ok")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
+                                                api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording GYRO completed")
                                                         },
                                                         { throwable: Throwable -> Log.e(TAG, "start offline GYRO failed " + throwable.toString())
                                                             if (throwable.toString().contains("CHARGER")){
-                                                                api.disconnectFromDevice(deviceId)
+                                                                api?.disconnectFromDevice(deviceId)
                                                             }}
                                                     )
                                             },
                                             { error: Throwable -> Log.e(TAG, "stopGYR() failed: ${error.message}")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
+                                                api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording GYRO completed")
                                                         },
                                                         { throwable: Throwable -> Log.e(TAG, "start offline GYRO failed " + throwable.toString())
                                                             if (throwable.toString().contains("CHARGER")){
-                                                                api.disconnectFromDevice(deviceId)
+                                                                api?.disconnectFromDevice(deviceId)
                                                             }}
                                                     )
                                             }
@@ -824,44 +912,44 @@ class MyServiceWork : Service() {
                                         .subscribe(
                                             {
                                                 Log.e(TAG, "stopPPG() ok")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
+                                                api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording PPG completed")
                                                         },
                                                         { throwable: Throwable -> Log.e(TAG, "start offline PPG failed " + throwable.toString())
                                                             if (throwable.toString().contains("CHARGER")){
-                                                                api.disconnectFromDevice(deviceId)
+                                                                api?.disconnectFromDevice(deviceId)
                                                             }}
                                                     )
 
                                             },
                                             { error: Throwable -> Log.e(TAG, "stopPPG() failed: ${error.message}")
-                                                api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
+                                                api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
                                                     .subscribe(
                                                         {
                                                             Log.d(TAG, "start offline recording PPG completed")
                                                         },
                                                         { throwable: Throwable -> Log.e(TAG, "start offline PPG failed " + throwable.toString())
                                                             if (throwable.toString().contains("CHARGER")){
-                                                                api.disconnectFromDevice(deviceId)
+                                                                api?.disconnectFromDevice(deviceId)
                                                             }}
                                                     )}
                                         )
 
                                 }else{
-                                    api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
+                                    api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.ACC, PolarSensorSetting(settingsACC.toMap()), yourSecret)
                                         .subscribe(
                                             {
                                                 Log.d(TAG, "start offline recording ACC completed")
                                             },
                                             { throwable: Throwable -> Log.e(TAG, "start offline recording ACC failed " + throwable.toString())
                                                 if (throwable.toString().contains("CHARGER")){
-                                                    api.disconnectFromDevice(deviceId)
+                                                    api?.disconnectFromDevice(deviceId)
                                                 }
                                             }
                                         )
-                                    api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
+                                    api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.GYRO, PolarSensorSetting(settingsGYRO.toMap()), yourSecret)
                                         .subscribe(
                                             {
                                                 Log.d(TAG, "start offline recording GYRO completed")
@@ -869,18 +957,18 @@ class MyServiceWork : Service() {
                                             { throwable: Throwable ->
                                                 Log.e(TAG, "start offline recording GYRO failed " + throwable.toString())
                                                 if (throwable.toString().contains("CHARGER")){
-                                                    api.disconnectFromDevice(deviceId)
+                                                    api?.disconnectFromDevice(deviceId)
                                                 }
                                             }
                                         )
-                                    api.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
+                                    api!!.startOfflineRecording(deviceId, PolarBleApi.PolarDeviceDataType.PPG, PolarSensorSetting(settingsPPG.toMap()), yourSecret)
                                         .subscribe(
                                             {
                                                 Log.d(TAG, "start offline recording PPG completed")
                                             },
                                             { throwable: Throwable -> Log.e(TAG, "start offline recording PPG failed " + throwable.toString())
                                                 if (throwable.toString().contains("CHARGER")){
-                                                    api.disconnectFromDevice(deviceId)
+                                                    api?.disconnectFromDevice(deviceId)
                                                 }
                                             }
                                         )
@@ -889,13 +977,13 @@ class MyServiceWork : Service() {
                             { error: Throwable ->
                                 val recordingStatusReadError = "Recording status read failed. Reason: $error"
                                 Log.e(TAG, recordingStatusReadError)
-                                api.disconnectFromDevice(deviceId)
+                                api?.disconnectFromDevice(deviceId)
                                 isPolarConnecting = false
                             }
                         )
 
                     // Descargamos los datos de todas las grabaciones
-                    val disposable = api.listOfflineRecordings(deviceId)
+                    val disposable = api!!.listOfflineRecordings(deviceId)
                         .observeOn(AndroidSchedulers.mainThread())
                         .doOnSubscribe { entryCache[deviceId] = mutableListOf() }
                         .map {
@@ -910,7 +998,7 @@ class MyServiceWork : Service() {
                                 Log.e(TAG, "Failed to list recordings: $error")
                                 Log.d(TAG, "Se desconecta el dispositivo")
                                 enviarMensaje("status","Se desconecta el dispositivo porque no hay grabaciones que descargar.")
-                                api.disconnectFromDevice(deviceId)
+                                api?.disconnectFromDevice(deviceId)
                                 isPolarConnecting = false
                             },
                             {
@@ -925,7 +1013,7 @@ class MyServiceWork : Service() {
                                 } else{
                                     Log.d(TAG, "Se desconecta el dispositivo")
                                     enviarMensaje("status","Se desconecta el dispositivo porque no hay grabaciones que descargar.")
-                                    api.disconnectFromDevice(deviceId)
+                                    api?.disconnectFromDevice(deviceId)
                                 }
                             }
                         )
@@ -943,17 +1031,17 @@ class MyServiceWork : Service() {
             return
         }
         isPolarConnecting = true
-        api.setPolarFilter(true)
-        api.setAutomaticReconnection(false)
+        api?.setPolarFilter(true)
+        api?.setAutomaticReconnection(false)
         // If there is need to log what is happening inside the SDK, it can be enabled like this:
         val enableSdkLogs = false
         if(enableSdkLogs) {
-            api.setApiLogger { s: String -> Log.d(API_LOGGER_TAG, s) }
+            api?.setApiLogger { s: String -> Log.d(API_LOGGER_TAG, s) }
         }
         initializeMaps()
         autoConnectFunction()
 
-        api.setApiCallback(object : PolarBleApiCallback() {
+        api?.setApiCallback(object : PolarBleApiCallback() {
             override fun blePowerStateChanged(powered: Boolean) {
                 Log.d(TAG, "BLE power: $powered")
             }
@@ -1062,6 +1150,15 @@ class MyServiceWork : Service() {
             Log.d(TAG, "El wakelock está activo")
             wakeLock!!.release();
         }
+
+        try {
+            api?.shutDown()
+            api = null
+            Log.d(TAG, "BLE api shutDown ejecutado en terminarEjecucion()")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error al hacer shutDown del api en terminarEjecucion: ${e.message}")
+        }
+
         stopSelf()
     }
 
@@ -1153,3 +1250,5 @@ class MyServiceWork : Service() {
             .build()
     }
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
