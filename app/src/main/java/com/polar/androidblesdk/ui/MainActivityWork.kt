@@ -1,5 +1,6 @@
 package com.polar.androidblesdk.ui
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlarmManager
@@ -37,8 +38,7 @@ import com.polar.androidblesdk.R
 import com.polar.sdk.api.PolarBleApiDefaultImpl
 import java.text.SimpleDateFormat
 import java.util.Date
-
-///////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
 class MainActivityWork : AppCompatActivity() {
 
     companion object {
@@ -122,13 +122,6 @@ class MainActivityWork : AppCompatActivity() {
         // Register the BroadcastReceiver to receive the custom events
         val intentFilter = IntentFilter("prueba")
         LocalBroadcastManager.getInstance(this).registerReceiver(broadcastReceiver, intentFilter)
-
-        /*val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val intent = Intent(this, AlarmReceiver::class.java)
-        intent.putExtra("momento_ultima_descarga", "-1")
-        val pendingIntent = PendingIntent.getBroadcast(this, 0, intent, FLAG_MUTABLE)
-        Log.d(TAG, "antes de llamar la alarma en el proceso general")
-        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, 1, pendingIntent)*/
 
         val millis = System.currentTimeMillis() + 10_000 // Espera de 10 segundos
         programarAlarmaDescarga(this, millis)
@@ -418,3 +411,5 @@ class MainActivityWork : AppCompatActivity() {
         toast.show()
     }
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////
