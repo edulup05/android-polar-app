@@ -82,6 +82,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.UUID
 import kotlin.concurrent.thread
+import com.polar.androidblesdk.utils.DeviceManager
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 //class MyServiceWork(context : Context, params : WorkerParameters) : Worker(context, params) {
 class MyServiceWork : Service() {
@@ -144,9 +145,7 @@ class MyServiceWork : Service() {
     private var minimoTiempoParaProcesarGrabacion = 1000 * 60
     private var frecuenciaConexion = 10000
 
-    private var deviceId : String= ""
-    private var devices: Array<String> = arrayOf("BA057E29") //BA057E29 - C4A50D2E
-    private var indexDeviceId = 0
+    private var deviceId = DeviceManager.deviceId
 
     private var startConnectDate = ""
     private var startConnectDateMilis = System.currentTimeMillis()
@@ -154,7 +153,7 @@ class MyServiceWork : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
 
-    private var mqttServerURI = "tcp://16.171.152.69:1883"
+    private var mqttServerURI = "tcp://192.168.1.134:1883" //192.168.1.134 (PC) - 16.171.152.69
     private var mqttTopic = "polar/"
     private var mqttConnected = false
 
@@ -193,21 +192,31 @@ class MyServiceWork : Service() {
 
     ///////////////////////////////////////////////
     @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    public override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG,"🛠️ onStartCommand executed with startId: $startId - MyServiceWork")
-        startConnectDateMilis = System.currentTimeMillis()
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "🛠️ onStartCommand ejecutado con startId: $startId - MyServiceWork")
 
+        val notification = createNotification()
+        startForeground(1, notification)
+
+        Thread {
+            ejecutarServicio(intent)
+        }.start()
+
+        return START_STICKY
+    }
+
+    private fun ejecutarServicio(intent: Intent?) {
+        startConnectDateMilis = System.currentTimeMillis()
 
         if (!isBluetoothAvailable()) {
             enviarMensaje("status", "Bluetooth no disponible o no activado. Actívalo e inténtalo de nuevo.")
             terminarEjecucion()
-            return START_NOT_STICKY
+            return
         }
 
-        // Autoreinicio de bluetooth
         try {
             Log.d(TAG, "Auto-reinicio de Bluetooth antes de crear la API Polar")
-            api?.shutDown()   // Si existe, cerramos antes de reiniciar BLE
+            api?.shutDown()
             api = null
             val bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
             if (bluetoothAdapter != null && bluetoothAdapter.isEnabled) {
@@ -216,9 +225,9 @@ class MyServiceWork : Service() {
                 bluetoothAdapter.enable()
                 Thread.sleep(1800)
                 if (!bluetoothAdapter.isEnabled) {
-                    enviarMensaje("status", "No se pudo reactivar Bluetooth automáticamente. Cancelo ejecución.")
+                    enviarMensaje("status", "No se pudo reactivar Bluetooth automáticamente.")
                     terminarEjecucion()
-                    return START_NOT_STICKY
+                    return
                 }
                 Log.d(TAG, "Bluetooth reiniciado correctamente.")
             }
@@ -226,7 +235,7 @@ class MyServiceWork : Service() {
             Log.e(TAG, "Error reiniciando Bluetooth: ${e.message}")
             enviarMensaje("status", "Error reiniciando Bluetooth: ${e.message}")
             terminarEjecucion()
-            return START_NOT_STICKY
+            return
         }
 
         if (api == null) {
@@ -242,71 +251,53 @@ class MyServiceWork : Service() {
             )
         }
 
-        if(intent?.getStringExtra("momento_ultima_descarga") != null){
-            Log.d(TAG,"El parametro que se recibe en la creación del servicio es : ${intent?.getStringExtra("momento_ultima_descarga")}")
-            momento_ultima_descarga = intent?.getStringExtra("momento_ultima_descarga")!!.toLong()
-        }else{
-            Log.d(TAG,"No se recibe el parámetro")
+        momento_ultima_descarga = intent?.getStringExtra("momento_ultima_descarga")?.toLong() ?: -1
+        Log.d(TAG, "El momento de la última descarga es $momento_ultima_descarga")
+
+        if (intent?.getStringExtra("param") != null) {
+            Log.d(TAG, "Parámetro de prueba: ${intent.getStringExtra("param")}")
         }
 
-        if(intent?.getStringExtra("param") != null){
-            Log.d(TAG,"El parametro de prueba es : ${intent?.getStringExtra("param")}")
-        }else{
-            Log.d(TAG,"No se recibe el parámetro param")
+        wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyServiceWork::lock")
+            .apply { acquire() }
+
+        if (isInternetAvailable()) {
+            connectMQTT()
         }
 
-        wakeLock =
-            (getSystemService(POWER_SERVICE) as PowerManager).run {
-                newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyServiceWork::lock").apply { acquire() }
-            }
-
-        if (isInternetAvailable()) { connectMQTT() }
-
-        //enviarMensaje("status","El jobId es ${jobId.toString()}")
         val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        fileDir  = File(documentsDir, "POLAR")
-        Log.d(TAG,"El path es: "+ documentsDir.absolutePath.toString())
+        fileDir = File(documentsDir, "POLAR")
+        Log.d(TAG, "El path es: ${documentsDir.absolutePath}")
 
         if (!fileDir.exists()) {
             val success = fileDir.mkdirs()
-            if (success) {
-                Log.d("MainActivity", "Carpeta creada correctamente")
-            } else {
-                Log.d("MainActivity", "Error al crear la carpeta")
-            }
+            Log.d("MainActivity", if (success) "Carpeta creada correctamente" else "Error al crear la carpeta")
         }
 
-        indexDeviceId = 0
-        deviceId = devices[indexDeviceId]
         startConnectDate = getCurrentDateTime()
 
-        var notification = createNotification()
-        startForeground(1, notification)
-
-        Log.d(TAG, "El momento de la ultima descarga es ${momento_ultima_descarga}")
-        if(momento_ultima_descarga == (-1).toLong() ){
+        if (momento_ultima_descarga == -1L) {
             momento_ultima_descarga = System.currentTimeMillis()
-            Log.d(TAG, "onStart - Primera - ${momento_ultima_descarga}")
-            enviarMensaje("status","Entra a descargar los datos. Es la primera vez.")
-            realizaConexion = true
+            Log.d(TAG, "onStart - Primera - $momento_ultima_descarga")
+            enviarMensaje("status", "Primera vez. Descargando datos...")
             primeraDescarga = true
+            realizaConexion = true
             connectToDevice()
-        }
-        else{
-            if(momento_ultima_descarga + frecuenciaDescarga < startConnectDateMilis){
-                Log.d(TAG, "onStart - No Primera - Descarga - ${momento_ultima_descarga}")
-                enviarMensaje("status","Entra a descargar los datos. No es la primera vez.")
+        } else {
+            if (momento_ultima_descarga + frecuenciaDescarga < startConnectDateMilis) {
+                Log.d(TAG, "onStart - No Primera - Descarga - $momento_ultima_descarga")
+                enviarMensaje("status", "Descargando datos (no es la primera vez)...")
                 realizaConexion = true
                 connectToDevice()
-            }else{
-                Log.d(TAG, "onStart - No Primera - No Descarga - ${momento_ultima_descarga}")
-                enviarMensaje("status","No ha pasado el tiempo suficiente para que se descarguen los datos.")
+            } else {
+                Log.d(TAG, "onStart - No Primera - No Descarga - $momento_ultima_descarga")
+                enviarMensaje("status", "No ha pasado el tiempo suficiente para descargar.")
                 terminarEjecucion()
             }
         }
-
-        return START_STICKY
     }
+
 
     ///////////////////////////////////////////////
     public override fun onDestroy() {
@@ -359,7 +350,10 @@ class MyServiceWork : Service() {
             Log.d(TAG, "Se ha conectado a MQTT")
             mqttConnected = true
         } catch (e: java.lang.Exception) {
-            Log.d(TAG, "Se ha producido un error al conectar MQTT -> " + e.printStackTrace())
+            Log.e(TAG, "❌ Error al conectar a MQTT: ${e.message}")
+            mqttConnected = false
+            enviarMensaje("status", "No se pudo conectar al servidor MQTT.")
+            terminarEjecucion()
         }
     }
 
@@ -791,9 +785,8 @@ class MyServiceWork : Service() {
     ///////////////////////////////////////////////
     private fun autoConnectFunction() {
         if(!deviceConnected){
-            Log.d(TAG,"Se está intentando conectar a "+deviceId)
-            deviceId = devices[indexDeviceId]
-            enviarMensaje("status","Se está intentando conectar con el dispositivo ${indexDeviceId +1}.")
+            Log.d(TAG,"Se está intentando conectar a "+ deviceId)
+            enviarMensaje("status","Se está intentando conectar con el dispositivo ${deviceId}.")
             api?.connectToDevice(deviceId)
             Log.d(TAG,"continua  "+deviceId)
         }
@@ -801,9 +794,8 @@ class MyServiceWork : Service() {
             Thread.sleep(15000)
             Log.d(TAG,"segunda comprobación si está conectado  "+deviceId)
             if(!deviceConnected){
-                Log.e(TAG, "Comprobación. Error al conectar el dispositivo ${indexDeviceId + 1}. Current deviceId = ${deviceId}")
-                enviarMensaje("status","No se ha podido conectar con el dispositivo ${indexDeviceId + 1}.")
-                enviarMensaje("battery","")
+                Log.e(TAG, "Comprobación. Error al conectar el dispositivo ${deviceId}. Current deviceId = ${deviceId}")
+                enviarMensaje("status","No se ha podido conectar con el dispositivo ${deviceId}.")
                 isPolarConnecting = false
                 terminarEjecucion()
             }else{
@@ -1085,8 +1077,6 @@ class MyServiceWork : Service() {
 
     ///////////////////////////////////////////////
     private fun terminarEjecucion(){
-        indexDeviceId = 0
-        deviceId = ""
         isPolarConnecting = false
 
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager

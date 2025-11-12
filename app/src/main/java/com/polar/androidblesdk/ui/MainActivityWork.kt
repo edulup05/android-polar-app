@@ -35,6 +35,7 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.google.gson.Gson
 import com.polar.androidblesdk.receiver.AlarmReceiver
 import com.polar.androidblesdk.R
+import com.polar.androidblesdk.utils.DeviceManager
 import com.polar.sdk.api.PolarBleApiDefaultImpl
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -62,9 +63,6 @@ class MainActivityWork : AppCompatActivity() {
     private lateinit var editTextCarbohidratos: EditText
     private lateinit var spinnerTipoAbsorcion: Spinner
     private lateinit var btnRegistrarCarbohidratos: Button
-
-    private var dispositivosClientes = HashMap<String, String>()
-    private var dispositivos = ArrayList<String>()
 
     private lateinit var intent : Intent
     private var wakeLock: PowerManager.WakeLock? = null
@@ -108,12 +106,7 @@ class MainActivityWork : AppCompatActivity() {
 
         estatusText.text = "Iniciando..."
 
-        dispositivosClientes["BA057E29"] = "Dispositivo 1" //BA057E29 - C4A50D2E
-        dispositivos.add("BA057E29")
-
-        for(i in 0 until dispositivosClientes.size){
-            addItemToBatteryContainer("Battería ${i+1}", "-")
-        }
+        addItemToBatteryContainer("Batería", "-")
 
         // Initialize the Handler and Runnable
         Log.d(TAG, "Actividad principal. Antes de iniciar el servicio.")
@@ -279,32 +272,60 @@ class MainActivityWork : AppCompatActivity() {
         )
     }
 
+    /////////////////////////////////////////////// ???
+    private fun cancelarAlarmaDescarga() {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, AlarmReceiver::class.java)
+        val pendingIntent = PendingIntent.getBroadcast(
+            this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+        alarmManager.cancel(pendingIntent)
+    }
+
     ///////////////////////////////////////////////
     private val broadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val message = intent.getStringExtra("status")
-            val mensaje_splitted = message?.split("__")
-            val dispositivo = mensaje_splitted?.get(0)
-            val tipo = mensaje_splitted?.get(1)
-            val valor = mensaje_splitted?.get(2)
-            Log.d(TAG,"Total: ${message.toString()}. Individual = ${dispositivo} - ${tipo} - ${valor}")
-            if(tipo == "battery"){
-                val index = dispositivos.indexOf(dispositivo)
-                if(valor != ""){
-                    Log.d(TAG, "${dispositivosClientes[dispositivo]} -> Tiene un ${valor}% de batería.")
-                    anadir_evento_lista("${dispositivosClientes[dispositivo]} -> Tiene un ${valor}% de batería.")
-                    estatusText.text = "${dispositivosClientes[dispositivo]} -> Tiene un ${valor}% de batería."
-                    changeBatteryValue(index,"${valor}%")
-                }else{
-                    changeBatteryValue(index,"-")
+            val message = intent.getStringExtra("status") ?: return
+            Log.d(TAG, "🟡 Mensaje recibido: $message")
+
+            val partes = message.split("__")
+            if (partes.size != 3) {
+                Log.w(TAG, "❌ Mensaje mal formado: $message")
+                return
+            }
+
+            val deviceId = partes[0]
+            val tipo = partes[1]
+            val valor = partes[2]
+
+            Log.d(TAG, "🔍 Analizado: deviceId=$deviceId | tipo=$tipo | valor=$valor")
+
+            when (tipo) {
+                "battery" -> {
+                    val index = 0
+                    if (valor.isNotEmpty()) {
+                        val msg = "Dispositivo $deviceId -> Tiene un $valor% de batería."
+                        Log.d(TAG, msg)
+                        anadir_evento_lista(msg)
+                        estatusText.text = msg
+                        changeBatteryValue(index, "$valor%")
+                    } else {
+                        changeBatteryValue(index, "-")
+                    }
                 }
-            }else if(tipo == "connection"){
-                anadir_evento_lista("${valor}")
-                estatusText.text = "${valor}"
-                //enableButton(descargar_datos)
-            }else{
-                anadir_evento_lista("${dispositivosClientes[dispositivo]} -> ${valor}")
-                estatusText.text = "${dispositivosClientes[dispositivo]} -> ${valor}"
+                "connection" -> {
+                    anadir_evento_lista(valor)
+                    estatusText.text = valor
+                }
+                "status" -> {
+                    anadir_evento_lista(valor)
+                    estatusText.text = valor
+                }
+                else -> {
+                    Log.w(TAG, "⚠️ Tipo de mensaje no reconocido: $tipo")
+                    anadir_evento_lista("Dispositivo $deviceId -> $valor")
+                    estatusText.text = "Dispositivo $deviceId -> $valor"
+                }
             }
         }
     }
@@ -321,12 +342,13 @@ class MainActivityWork : AppCompatActivity() {
         val batteryItemLayout = LinearLayout(this)
         batteryItemLayout.orientation = LinearLayout.VERTICAL
 
-        batteryItemLayout.layoutParams = LinearLayout.LayoutParams(
-            0,
+        val layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT,
-            1.toFloat()/(dispositivos.size).toFloat()
+            LinearLayout.LayoutParams.WRAP_CONTENT
         )
-        batteryItemLayout.gravity = Gravity.CENTER // Set the gravity to center
+        layoutParams.gravity = Gravity.CENTER_HORIZONTAL
+        batteryItemLayout.layoutParams = layoutParams
+
         // Create and customize the ImageView
         val imageView = ImageView(this)
         imageView.layoutParams = LinearLayout.LayoutParams(dpToPx(48), dpToPx(48))
@@ -340,19 +362,20 @@ class MainActivityWork : AppCompatActivity() {
             LinearLayout.LayoutParams.WRAP_CONTENT
         )
         textView1.text = text1 // Set the desired text
-        textView1.setTextColor(Color.parseColor("#0D47A1")) // Set the desired text color
+        textView1.setTextColor(Color.parseColor("#8B0000")) // Set the desired text color
         textView1.textSize = 16f // Set the desired text size
         batteryItemLayout.addView(textView1)
 
         // Create and customize the second TextView
         val textView2 = TextView(this)
         textView2.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         )
-        textView2.text = text2 // Set the desired text
-        textView2.setTextColor(Color.parseColor("#0D47A1")) // Set the desired text color
-        textView2.textSize = 16f // Set the desired text size
+        textView2.textAlignment = TextView.TEXT_ALIGNMENT_CENTER
+        textView2.text = text2
+        textView2.setTextColor(Color.parseColor("#8B0000"))
+        textView2.textSize = 16f
         batteryItemLayout.addView(textView2)
 
         // Add the battery item to the LinearLayout container
@@ -403,6 +426,7 @@ class MainActivityWork : AppCompatActivity() {
     public override fun onDestroy() {
         super.onDestroy()
         //api.shutDown()
+        cancelarAlarmaDescarga() //?
     }
 
     ///////////////////////////////////////////////

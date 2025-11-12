@@ -253,11 +253,12 @@
 
             <!-- //////////////////////////////////////////////////////////// -->
             <LinearLayout
+                android:id="@+id/battery_container_list"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:id="@+id/battery_container_list"
-                android:weightSum="1">
+                android:weightSum="1"
+                android:gravity="center_horizontal">
             </LinearLayout>
 
             <View
